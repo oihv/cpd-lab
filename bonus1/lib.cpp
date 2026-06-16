@@ -115,6 +115,10 @@ bool state_list_contain_idx(size_t *key_idx, StateList *list) {
 }
 
 void state_list_print(char names[][MAX_STATE_LENGTH], StateList *s) {
+  if (s->count == 0) {
+    printf("-");
+    return;
+  }
   printf("{");
   for (int j = 0; j < s->count; j++) {
     printf("%s", names[s->state_idxs[j]]);
@@ -164,6 +168,20 @@ Result nfa_parse(NFA *nfa, FILE *fp) {
       while (token) {
         strcpy(nfa->alphabets.names[nfa->alphabets.count++], token);
         token = strtok(NULL, " \t\n\r");
+      }
+      // put "eps" in the last slot, if there's any
+      for (int i = 0; i < nfa->alphabets.count; i++) {
+        if (!strncmp(nfa->alphabets.names[i], "eps", 3)) {
+          if (i != nfa->alphabets.count - 1) {
+            char *last = nfa->alphabets.names[nfa->alphabets.count - 1];
+            char *eps = nfa->alphabets.names[i];
+            char temp_str[MAX_ALPHABET_LENGTH] = {0};
+            strcpy(temp_str, last);
+            strcpy(last, eps);
+            strcpy(eps, temp_str);
+          }
+          break;
+        }
       }
     } else if (!strncmp(buff, "Start:", 6)) {
       char *token = strtok(buff + 6, " \t\n\r");
@@ -224,7 +242,7 @@ Result nfa_parse(NFA *nfa, FILE *fp) {
                 token);
             return Err;
           }
-          assert(s->count+1 <= MAX_STATES);
+          assert(s->count + 1 <= MAX_STATES);
           s->state_idxs[s->count++] = idx;
           token = strtok(NULL, " \t\n\r");
         }
@@ -235,8 +253,83 @@ Result nfa_parse(NFA *nfa, FILE *fp) {
   return Ok;
 }
 
-Result eps_nfa_parse(NFA* nfa, FILE* fp) {
+// eps-NFA is just an NFA that have eps as a transition alphabet
+Result eps_nfa_parse(NFA *nfa, FILE *fp) {
   nfa_parse(nfa, fp);
+  bool found = false;
+  for (int i = 0; i < nfa->alphabets.count; i++) {
+    if (!strncmp(nfa->alphabets.names[i], "eps", 3)) {
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    fprintf(stderr, "ERROR: %s: eps-NFA don't have eps transition alphabet\n",
+            __FUNCTION__);
+    return Err;
+  }
+  return Ok;
+}
+
+Result eps_nfa_to_nfa(NFA *nfa) {
+  size_t eps_i = 0;
+  bool found = false;
+  for (int j = 0; j < nfa->alphabets.count; j++) {
+    if (!strncmp(nfa->alphabets.names[j], "eps", 3)) {
+      eps_i = j;
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    fprintf(stderr, "ERROR: %s: eps-NFA don't have eps transition alphabet\n",
+            __FUNCTION__);
+  }
+  for (int i = 0; i < nfa->states.count; i++) {
+    StateList eps_closure = {0};
+    Queue unchecked_states = {0};
+    eps_closure.state_idxs[eps_closure.count++] = i;
+    queue_push(&unchecked_states, i);
+    // compute eps closure
+    while (!queue_is_empty(&unchecked_states)) {
+      size_t curr = queue_pop(&unchecked_states, &curr);
+      for (int j = 0; j < nfa->transition[i][eps_i].count; j++) {
+        size_t to = nfa->transition[i][eps_i].state_idxs[j];
+        if (!state_list_contain_idx(&to, &eps_closure)) {
+          eps_closure.state_idxs[eps_closure.count++] = to;
+          queue_push(&unchecked_states, to);
+        }
+      }
+    }
+    // add state to final, if the closure contains one of the final states
+    for (int j = 0; j < eps_closure.count; j++) {
+      if (state_list_contain_idx(&eps_closure.state_idxs[j], &nfa->final)) {
+        if(!state_list_contain_idx((size_t*)&i, &nfa->final)) {
+          nfa->final.state_idxs[nfa->final.count++] = i;
+        }
+      }
+    }
+    // subset construction
+    // for each alphabet
+    for (int j = 0; j < nfa->alphabets.count; j++) {
+      StateList new_s = {0};
+      // for each state in "from"
+      for (int k = 0; k < eps_closure.count; k++) {
+        StateList *to =
+            &nfa->transition[eps_closure.state_idxs[k]][j];
+        // for each state in "to"
+        for (int l = 0; l < to->count; l++) {
+          if (!state_list_contain_idx(&to->state_idxs[l], &new_s)) {
+            new_s.state_idxs[new_s.count++] = to->state_idxs[l];
+          };
+        }
+      }
+      qsort(new_s.state_idxs, new_s.count, sizeof(size_t), compare);
+      nfa->transition[i][j] = new_s;
+    }
+  }
+  qsort(nfa->final.state_idxs, nfa->final.count, sizeof(size_t), compare);
+  nfa->alphabets.count--;
   return Ok;
 }
 
@@ -247,7 +340,8 @@ Result state_set_parse(StateList *states, char *buff, StateNames *name_list) {
   // char buff_cp[MAX_STATE_LENGTH];
   // strcpy(buff_cp, buff);
 
-  if (!buff || *buff == '\0') return Err;
+  if (!buff || *buff == '\0')
+    return Err;
   while (buff[strlen(buff) - 1] != '}') {
     if (strlen(buff) == 1) {
       fprintf(stderr,
@@ -259,7 +353,7 @@ Result state_set_parse(StateList *states, char *buff, StateNames *name_list) {
   }
   // buff[strlen(buff) - 1] = '\0';
 
-  char* ptr;
+  char *ptr;
   char *token = strtok_r(buff, " ", &ptr);
   bool end = false;
 
@@ -281,7 +375,7 @@ Result state_set_parse(StateList *states, char *buff, StateNames *name_list) {
       return Err;
     }
 
-    assert(states->count+1 <= MAX_STATES);
+    assert(states->count + 1 <= MAX_STATES);
     states->state_idxs[states->count++] = idx;
 
     token = strtok_r(NULL, " ", &ptr);
@@ -300,7 +394,7 @@ Result dfa_parse(DFA *dfa, StateSetList *state_set, FILE *fp,
   char buff[buff_length];
   while (fgets(buff, buff_length, fp)) {
     if (!strncmp(buff, "States:", 7)) {
-      char* ptr;
+      char *ptr;
       char *token = strtok_r(buff + 8, "{", &ptr);
       while (token) {
         if (!strcmp(token, " ")) {
@@ -342,7 +436,7 @@ Result dfa_parse(DFA *dfa, StateSetList *state_set, FILE *fp,
         }
       }
     } else if (!strncmp(buff, "Final:", 6)) {
-      char* ptr;
+      char *ptr;
       char *token = strtok_r(buff + 6, "{", &ptr);
       while (token) {
         if (!strcmp(token, " ")) {
@@ -350,11 +444,12 @@ Result dfa_parse(DFA *dfa, StateSetList *state_set, FILE *fp,
         }
         size_t idx;
         StateList curr_list = {0};
-        if(state_set_parse(&curr_list, token,
-                        name_list) != Ok) {
-          fprintf(stderr, "%s: can't find final state (%s)\n", __FUNCTION__, token);
+        if (state_set_parse(&curr_list, token, name_list) != Ok) {
+          fprintf(stderr, "%s: can't find final state (%s)\n", __FUNCTION__,
+                  token);
         }
-        qsort(&dfa->final.state_idxs, dfa->final.count, sizeof(size_t), compare);
+        qsort(&dfa->final.state_idxs, dfa->final.count, sizeof(size_t),
+              compare);
         if (find_state_list(&dfa->states, &curr_list, &idx) != Ok) {
           fprintf(stderr,
                   "ERROR: %s, when parsing DFA, State not in States (State "
@@ -367,7 +462,7 @@ Result dfa_parse(DFA *dfa, StateSetList *state_set, FILE *fp,
       }
     } else if (!strncmp(buff, "Transitions:", 12)) {
       while (fgets(buff, sizeof(buff), fp)) {
-        char* ptr;
+        char *ptr;
         char buff_cp[buff_length];
         strcpy(buff_cp, buff); // buff_cp always hold the original buffer
         char tok_cp[buff_length];
@@ -386,9 +481,10 @@ Result dfa_parse(DFA *dfa, StateSetList *state_set, FILE *fp,
         }
         size_t from_idx = idx;
         strcpy(buff, buff_cp);
-        token = strtok_r(buff, "}", &ptr); // transition, this resets from original buffer
+        token = strtok_r(buff, "}",
+                         &ptr); // transition, this resets from original buffer
         token = strtok_r(NULL, "}", &ptr); // so we take the next tok
-        token = strtok_r(token, " ", &ptr); 
+        token = strtok_r(token, " ", &ptr);
         if (find_state(token, dfa->alphabets.names, dfa->alphabets.count,
                        &idx) != Ok) {
           fprintf(stderr,
@@ -562,8 +658,47 @@ void dfa_print(DFA *dfa, char names[][MAX_STATE_LENGTH]) {
     for (int j = 0; j < dfa->alphabets.count; j++) {
       state_list_print(names, &dfa->states.set[i]);
       printf(" ");
-      printf("%s ", dfa->alphabets.names[i]);
+      printf("%s ", dfa->alphabets.names[j]);
       state_list_print(names, &dfa->states.set[dfa->transition[i][j]]);
+      printf("\n");
+    }
+  }
+}
+
+void nfa_print(NFA *nfa, char names[][MAX_STATE_LENGTH]) {
+  printf("States: ");
+  for (int i = 0; i < nfa->states.count; i++) {
+    printf("%s", names[i]);
+    if (i != nfa->states.count - 1)
+      printf(" ");
+  }
+  printf("\n");
+
+  printf("Alphabet: ");
+  for (int i = 0; i < nfa->alphabets.count; i++) {
+    printf("%s", nfa->alphabets.names[i]);
+    if (i != nfa->alphabets.count - 1)
+      printf(" ");
+  }
+  printf("\n");
+
+  printf("Start: %s\n", names[nfa->start_idx]);
+
+  printf("Final: ");
+  for (int i = 0; i < nfa->final.count; i++) {
+    printf("%s", names[nfa->final.state_idxs[i]]);
+    if (i != nfa->final.count - 1)
+      printf(" ");
+  }
+  printf("\n\n");
+
+  printf("Transitions:\n");
+  for (int i = 0; i < nfa->states.count; i++) {
+    for (int j = 0; j < nfa->alphabets.count; j++) {
+      printf("%s", names[i]);
+      printf(" ");
+      printf("%s ", nfa->alphabets.names[j]);
+      state_list_print(names, &nfa->transition[i][j]);
       printf("\n");
     }
   }
