@@ -2,12 +2,13 @@
 <html>
 <head>
     <meta charset="utf-8">
+    <base href="bonus1/build_wasm/">
     <title>NFA to DFA Animator</title>
     <style>
         body { margin: 0; background-color: #222; color: #eee; overflow: hidden; }
         canvas { 
             display: block; width: 100vw; height: 100vh;
-            image-rendering: pixelated; /* Keeps it crisp */
+            image-rendering: pixelated;
         }
         #status { position: absolute; top: 10px; left: 10px; font-family: monospace; }
     </style>
@@ -22,14 +23,13 @@
             setStatus: function(text) { document.getElementById('status').innerText = text; },
             onRuntimeInitialized: function() { Module.setStatus("Running"); },
             locateFile: function(path, prefix) {
-                // If the path is index.wasm or index.data, ensure it's relative to the current folder
                 if (path.endsWith(".wasm") || path.endsWith(".data")) {
-                    return prefix + path; 
+                    return "bonus1/build_wasm/" + path;
                 }
                 return prefix + path;
             },
         };
     </script>
-    <script async type="text/javascript" src="index.js"></script> <!-- emcc replaces this with the actual WASM loader -->
+    <script async type="text/javascript" src="index.js"></script>
 </body>
 </html>
