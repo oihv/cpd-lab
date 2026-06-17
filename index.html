@@ -22,12 +22,6 @@
             canvas: (function() { return document.getElementById('canvas'); })(),
             setStatus: function(text) { document.getElementById('status').innerText = text; },
             onRuntimeInitialized: function() { Module.setStatus("Running"); },
-            locateFile: function(path, prefix) {
-                if (path.endsWith(".wasm") || path.endsWith(".data")) {
-                    return "bonus1/build_wasm/" + path;
-                }
-                return prefix + path;
-            },
         };
     </script>
     <script async type="text/javascript" src="index.js"></script>
