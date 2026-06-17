@@ -1,6 +1,6 @@
 States: {q0} {q0 q1} {q0 q1 q2}
 Alphabet: 0 1
-Start: q0
+Start: {q0}
 Final: {q0 q1} {q0 q1 q2}
 
 Transitions:

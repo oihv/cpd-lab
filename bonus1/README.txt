@@ -6,5 +6,9 @@ The name of the states is only stored once in a `StateNames` struct, all the oth
 - [x] eps nfa to nfa
 - [ ] implement animation
   - [x] draw transition table
-  - [ ] implement step tracing for functions: nfa to dfa, eps nfa to nfa (with snapshots)
-  - [ ] 
+  - [x] implement step tracing for functions: nfa to dfa, eps nfa to nfa (with snapshots)
+  - [ ] animate for other type of snapshots too
+  - [x] nfa to dfa snapshots
+  - [ ] eps nfa to nfa snapshots
+- [x] WASM port
+- [ ] new page for entering inputs and selection (try to integrate raygui)

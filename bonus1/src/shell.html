@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>NFA to DFA Animator</title>
+    <style>
+        body { margin: 0; background-color: #222; color: #eee; overflow: hidden; }
+        canvas { 
+            display: block; width: 100vw; height: 100vh;
+            image-rendering: pixelated; /* Keeps it crisp */
+        }
+        #status { position: absolute; top: 10px; left: 10px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div id="status">Loading...</div>
+    <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+    
+    <script type='text/javascript'>
+        var Module = {
+            canvas: (function() { return document.getElementById('canvas'); })(),
+            setStatus: function(text) { document.getElementById('status').innerText = text; },
+            onRuntimeInitialized: function() { Module.setStatus("Running"); }
+        };
+    </script>
+    {{{ SCRIPT }}} <!-- emcc replaces this with the actual WASM loader -->
+</body>
+</html>

@@ -1,27 +1,4 @@
-#include "raylib.h"
-#include <assert.h>
-#include <cstddef>
-#include <cstdint>
-#include <cstdlib>
-#include <stdio.h>
-#include <string.h>
-
-#define MAX_STATES 10
-#define MAX_STATE_LENGTH 5
-#define MAX_ALPHABETS 5
-#define MAX_ALPHABET_LENGTH 5
-#define MAX_FINAL_STATES 5
-#define MAX_STATE_SET 8
-
-#define MAX_QUEUE_SIZE 10
-
-typedef enum { Ok, Err } Result;
-
-typedef struct {
-  size_t item[MAX_QUEUE_SIZE];
-  size_t pop_idx;
-  size_t count;
-} Queue;
+#include "base.h"
 
 Result queue_push(Queue *q, size_t new_item) {
   if (q->count == MAX_QUEUE_SIZE)
@@ -44,10 +21,13 @@ Result queue_pop(Queue *q, size_t *item) {
 
 bool queue_is_empty(Queue *q) { return q->count == 0; }
 
-typedef struct {
-  size_t state_idxs[MAX_STATES];
-  size_t count;
-} StateList;
+void queue_to_state_list(Queue *q, StateList *s) {
+  size_t it = q->pop_idx;
+  for (int i = 0; i < q->count; i++) {
+    s->state_idxs[s->count++] = q->item[it];
+    it = (it + 1) % MAX_QUEUE_SIZE;
+  }
+}
 
 // Return Err when not found
 Result find_state(char *name, char states[][MAX_STATE_LENGTH],
@@ -72,11 +52,6 @@ int compare(const void *a, const void *b) {
   else
     return 1;
 }
-
-typedef struct {
-  StateList set[MAX_STATES];
-  size_t count;
-} StateSetList;
 
 int compare_state_set(const void *a, const void *b) {
   StateSetList ssl_a = *((StateSetList *)a);
@@ -143,33 +118,6 @@ void state_list_sprint(char names[][MAX_STATE_LENGTH], StateList *s,
   }
   sprintf(str + strlen(str), "}");
 }
-
-typedef struct {
-  char names[MAX_STATES][MAX_STATE_LENGTH];
-  size_t count;
-} StateNames;
-
-typedef struct {
-  char names[MAX_ALPHABETS][MAX_ALPHABET_LENGTH];
-  uint8_t count;
-} AlphabetNames;
-
-typedef struct {
-  StateNames states;
-  AlphabetNames alphabets;
-  size_t start_idx;
-  StateList final;
-  StateList transition[MAX_STATES][MAX_ALPHABETS]; // points to a set of states
-} NFA;
-
-typedef struct {
-  StateSetList states; // group of states in the global state
-  AlphabetNames alphabets;
-  size_t start_idx;
-  StateList final; // index of the states in this struct
-  size_t transition[MAX_STATES][MAX_ALPHABETS]; // points to the "state set"
-} DFA;
-
 StateSetList nfa_default_state_set_list(NFA *nfa) {
   StateSetList res = {.count = nfa->states.count};
   for (int i = 0; i < res.count; i++) {
@@ -310,6 +258,7 @@ Result eps_nfa_to_nfa(NFA *nfa) {
     fprintf(stderr, "ERROR: %s: eps-NFA don't have eps transition alphabet\n",
             __FUNCTION__);
   }
+  StateList temp_transition[MAX_STATES][MAX_ALPHABETS] = {0};
   for (int i = 0; i < nfa->states.count; i++) {
     StateList eps_closure = {0};
     Queue unchecked_states = {0};
@@ -317,9 +266,10 @@ Result eps_nfa_to_nfa(NFA *nfa) {
     queue_push(&unchecked_states, i);
     // compute eps closure
     while (!queue_is_empty(&unchecked_states)) {
-      size_t curr = queue_pop(&unchecked_states, &curr);
-      for (int j = 0; j < nfa->transition[i][eps_i].count; j++) {
-        size_t to = nfa->transition[i][eps_i].state_idxs[j];
+      size_t curr;
+      queue_pop(&unchecked_states, &curr);
+      for (int j = 0; j < nfa->transition[curr][eps_i].count; j++) {
+        size_t to = nfa->transition[curr][eps_i].state_idxs[j];
         if (!state_list_contain_idx(&to, &eps_closure)) {
           eps_closure.state_idxs[eps_closure.count++] = to;
           queue_push(&unchecked_states, to);
@@ -349,7 +299,12 @@ Result eps_nfa_to_nfa(NFA *nfa) {
         }
       }
       qsort(new_s.state_idxs, new_s.count, sizeof(size_t), compare);
-      nfa->transition[i][j] = new_s;
+      temp_transition[i][j] = new_s;
+    }
+  }
+  for (int i = 0; i < nfa->states.count; i++) {
+    for (int j = 0; j < nfa->alphabets.count; j++) {
+      nfa->transition[i][j] = temp_transition[i][j];
     }
   }
   qsort(nfa->final.state_idxs, nfa->final.count, sizeof(size_t), compare);
@@ -583,23 +538,94 @@ bool dfa_compare(DFA *a, DFA *b) {
   return true;
 }
 
-Result nfa_to_dfa(NFA *nfa, DFA *dfa) {
+void transition_filled_copy(bool dst[][MAX_ALPHABETS],
+                            bool src[][MAX_ALPHABETS]) {
+  for (int i = 0; i < MAX_STATES; i++) {
+    for (int j = 0; j < MAX_ALPHABETS; j++) {
+      dst[i][j] = src[i][j];
+    }
+  }
+}
+
+// *hist* is used for animation, NULL if not used
+Result nfa_to_dfa(NFA *nfa, DFA *dfa, History *hist) {
+  bool dfa_transition_filled[MAX_STATES][MAX_ALPHABETS] = {0};
   dfa->alphabets = nfa->alphabets;
   dfa->start_idx = nfa->start_idx;
+  char buff[MAX_STATE_LENGTH * MAX_STATES] = {0};
 
   Queue unchecked_states = {0};
   // add start state to states
   dfa->states.set[dfa->states.count++] =
       StateList{.state_idxs = {nfa->start_idx}, .count = 1};
+  if (hist) {
+    hist->steps[hist->count++] = {.type = STEP_NEW_STATE,
+                                  .dfa = *dfa,
+                                  .active_state = nfa->start_idx,
+                                  .description =
+                                      "Add start state to list of states"};
+  }
 
   for (int i = 0; i < nfa->alphabets.count; i++) {
     size_t idx;
     if (find_state_list(&dfa->states, &nfa->transition[0][i], &idx) != Ok) {
       dfa->transition[0][i] = dfa->states.count;
+      if (hist) {
+        Snapshot *handle = &hist->steps[hist->count++];
+        *handle = {
+            .type = STEP_ADD_TRANSITION,
+            .dfa = *dfa,
+            .queue = unchecked_states,
+            .active_state = nfa->start_idx,
+            .active_alphabet = (size_t)i,
+        };
+        dfa_transition_filled[0][i] = true;
+        transition_filled_copy(handle->dfa_transition_filled,
+                               dfa_transition_filled);
+        buff[0] = '\0';
+        state_list_sprint(nfa->states.names, &nfa->transition[0][i], buff);
+        sprintf(handle->description, "Add transition from %s on \"%s\" to %s",
+                nfa->states.names[0], nfa->alphabets.names[i], buff);
+      }
       queue_push(&unchecked_states, dfa->states.count);
       dfa->states.set[dfa->states.count++] = nfa->transition[0][i];
+      if (hist) {
+        Snapshot *handle = &hist->steps[hist->count++];
+        *handle = {
+            .type = STEP_NEW_STATE,
+            .dfa = *dfa,
+            .queue = unchecked_states,
+            .active_state = dfa->states.count - 1,
+        };
+        transition_filled_copy(handle->dfa_transition_filled,
+                               dfa_transition_filled);
+        buff[0] = '\0';
+        state_list_sprint(nfa->states.names,
+                          &dfa->states.set[handle->active_state], buff);
+        sprintf(handle->description,
+                "State not found in current states: Add new state %s, and add "
+                "it to unchecked_states",
+                buff);
+      }
     } else {
       dfa->transition[0][i] = idx;
+      if (hist) {
+        Snapshot *handle = &hist->steps[hist->count++];
+        *handle = {
+            .type = STEP_ADD_TRANSITION,
+            .dfa = *dfa,
+            .queue = unchecked_states,
+            .active_state = idx,
+            .active_alphabet = (size_t)i,
+        };
+        dfa_transition_filled[0][i] = true;
+        transition_filled_copy(handle->dfa_transition_filled,
+                               dfa_transition_filled);
+        buff[0] = '\0';
+        state_list_sprint(nfa->states.names, &dfa->states.set[idx], buff);
+        sprintf(handle->description, "Add transition from {%s} on \"%s\" to %s",
+                nfa->states.names[0], nfa->alphabets.names[i], buff);
+      }
     }
   }
 
@@ -609,12 +635,42 @@ Result nfa_to_dfa(NFA *nfa, DFA *dfa) {
       printf("ERROR: popping queue %d\n", __LINE__);
       return Err;
     };
+    if (hist) {
+      Snapshot *handle = &hist->steps[hist->count++];
+      *handle = {
+          .type = STEP_QUEUE_POP,
+          .dfa = *dfa,
+          .queue = unchecked_states,
+          .active_state = curr_idx,
+      };
+      transition_filled_copy(handle->dfa_transition_filled,
+                             dfa_transition_filled);
+      sprintf(handle->description, "Pop unchecked_states queue");
+    }
 
     // subset construction
     // for each alphabet
     for (int i = 0; i < nfa->alphabets.count; i++) {
       StateList new_s =
           nfa->transition[dfa->states.set[curr_idx].state_idxs[0]][i];
+      if (hist) {
+        Snapshot *handle = &hist->steps[hist->count++];
+        *handle = {
+            .type = STEP_SUBSET_CONSTRUCTION,
+            .dfa = *dfa,
+            .queue = unchecked_states,
+            .active_state = curr_idx,
+            .active_alphabet = (size_t)i,
+        };
+        transition_filled_copy(handle->dfa_transition_filled,
+                               dfa_transition_filled);
+        buff[0] = '\0';
+        state_list_sprint(nfa->states.names, &dfa->states.set[curr_idx], buff);
+        sprintf(handle->description,
+                "Subset construction started: populate new_state with states "
+                "that can be reached with \"%s\" from %s",
+                dfa->alphabets.names[i], buff);
+      }
       // for each state in "from"
       for (int j = 1; j < dfa->states.set[curr_idx].count; j++) {
         StateList *to =
@@ -627,13 +683,58 @@ Result nfa_to_dfa(NFA *nfa, DFA *dfa) {
         }
       }
       qsort(new_s.state_idxs, new_s.count, sizeof(size_t), compare);
+      if (hist) {
+        Snapshot *handle = &hist->steps[hist->count++];
+        *handle = {
+            .type = STEP_SUBSET_CONSTRUCTION,
+            .dfa = *dfa,
+            .queue = unchecked_states,
+            .active_state = dfa->states.set[curr_idx].state_idxs[0],
+            .active_alphabet = (size_t)i,
+            .highlight_set = new_s,
+        };
+        transition_filled_copy(handle->dfa_transition_filled, dfa_transition_filled);
+        buff[0] = '\0';
+        state_list_sprint(nfa->states.names, &dfa->states.set[curr_idx], buff);
+        sprintf(handle->description,
+                "Subset construction completed: check whether new_state "
+                "already exists in current_state");
+      }
       size_t found_idx;
       if (find_state_list(&dfa->states, &new_s, &found_idx) != Ok) {
-        dfa->transition[curr_idx][i] = dfa->states.count;
         queue_push(&unchecked_states, dfa->states.count);
         dfa->states.set[dfa->states.count++] = new_s;
+        if (hist) {
+          Snapshot *handle = &hist->steps[hist->count++];
+          *handle = {
+              .type = STEP_NEW_STATE,
+              .dfa = *dfa,
+              .queue = unchecked_states,
+              .active_state = dfa->states.count - 1,
+              .active_alphabet = (size_t)i,
+              .highlight_set = new_s,
+          };
+          transition_filled_copy(handle->dfa_transition_filled, dfa_transition_filled);
+          sprintf(handle->description,
+                  "new_state was not in states: new state was added");
+        }
+        dfa->transition[curr_idx][i] = dfa->states.count - 1;
       } else {
         dfa->transition[curr_idx][i] = found_idx;
+      }
+      if (hist) {
+        Snapshot *handle = &hist->steps[hist->count++];
+        *handle = {
+            .type = STEP_ADD_TRANSITION,
+            .dfa = *dfa,
+            .queue = unchecked_states,
+            .active_state = curr_idx,
+            .active_alphabet = (size_t)i,
+            .highlight_set = new_s,
+        };
+        dfa_transition_filled[curr_idx][i] = true;
+        transition_filled_copy(handle->dfa_transition_filled, dfa_transition_filled);
+        sprintf(handle->description, "Added new transition");
       }
     }
   }
@@ -724,96 +825,6 @@ void nfa_print(NFA *nfa, char names[][MAX_STATE_LENGTH]) {
       printf("%s ", nfa->alphabets.names[j]);
       state_list_print(names, &nfa->transition[i][j]);
       printf("\n");
-    }
-  }
-}
-
-void nfa_transition_table_draw(Vector2 pos, Vector2 size, NFA *nfa) {
-  Vector2 margin = (Vector2){.x = 5, .y = 5};
-  pos.x += margin.x;
-  pos.y += margin.y;
-  float table_w = size.x - 2 * margin.x;
-  float table_h = size.y - 2 * margin.y;
-  int cell_w = table_w / (nfa->states.count + 1);
-  int cell_h = table_h / (nfa->states.count + 1);
-  Vector2 padding = (Vector2){.x = 5, .y = 5};
-  char buff[MAX_STATE_LENGTH * MAX_STATES] = {0};
-  // row
-  for (int i = 0; i < nfa->states.count + 1; i++) {
-    Vector2 temp_pos = pos;
-    temp_pos.y += i * cell_h;
-    // col
-    for (int j = 0; j < nfa->alphabets.count + 1; j++) {
-      temp_pos.x += j * cell_w;
-      Vector2 text_temp_pos = temp_pos;
-      text_temp_pos.x += padding.x;
-      text_temp_pos.y += padding.y;
-      if (i == 0 && j == 0) {
-        continue; // skip first cell
-      }
-      if (i == 0) { // draw alphabet names first in the first column
-        DrawText(nfa->alphabets.names[j - 1], text_temp_pos.x, text_temp_pos.y,
-                 14, BLACK);
-        DrawLine(temp_pos.x, temp_pos.y, temp_pos.x, temp_pos.y + table_h,
-                 BLACK);
-      } else if (j == 0) { // draw state names
-        DrawText(nfa->states.names[i - 1], text_temp_pos.x, text_temp_pos.y, 14,
-                 GREEN);
-        DrawLine(temp_pos.x, temp_pos.y, temp_pos.x + table_w, temp_pos.y,
-                 BLACK);
-      } else {
-        buff[0] = 0;
-        state_list_sprint(nfa->states.names, &nfa->transition[i - 1][j - 1],
-                          buff);
-        DrawText(buff, text_temp_pos.x, text_temp_pos.y, 14, BLUE);
-      }
-    }
-  }
-}
-void dfa_transition_table_draw(Vector2 pos, Vector2 size, DFA *dfa,
-                               StateNames *names) {
-  Vector2 margin = (Vector2){.x = 5, .y = 5};
-  pos.x += margin.x;
-  pos.y += margin.y;
-  float table_w = size.x - 2 * margin.x;
-  float table_h = size.y - 2 * margin.y;
-  int cell_w = table_w / (dfa->states.count + 1);
-  int cell_h = table_h / (dfa->states.count + 1);
-  Vector2 padding = (Vector2){.x = 5, .y = 5};
-  char buff[MAX_STATE_LENGTH * MAX_STATES] = {0};
-  // row
-  for (int i = 0; i < dfa->states.count + 1; i++) {
-    Vector2 temp_pos = pos;
-    temp_pos.y += i * cell_h;
-    // col
-    for (int j = 0; j < dfa->alphabets.count + 1; j++) {
-      temp_pos.x += j * cell_w;
-      Vector2 text_temp_pos = temp_pos;
-      text_temp_pos.x += padding.x;
-      text_temp_pos.y += padding.y;
-      if (i == 0 && j == 0) {
-        continue; // skip first cell
-      }
-      if (i == 0) { // draw alphabet names first in the first column
-        DrawText(dfa->alphabets.names[j - 1], text_temp_pos.x, text_temp_pos.y,
-                 14, BLACK);
-        DrawLine(temp_pos.x, temp_pos.y, temp_pos.x, temp_pos.y + table_h,
-                 BLACK);
-      } else if (j == 0) { // draw state names
-        buff[0] = 0;
-        state_list_sprint(names->names,
-                          &dfa->states.set[i - 1],
-                          buff);
-        DrawText(buff, text_temp_pos.x, text_temp_pos.y, 14, GREEN);
-        DrawLine(temp_pos.x, temp_pos.y, temp_pos.x + table_w, temp_pos.y,
-                 BLACK);
-      } else {
-        buff[0] = 0;
-        state_list_sprint(names->names,
-                          &dfa->states.set[dfa->transition[i - 1][j - 1]],
-                          buff);
-        DrawText(buff, text_temp_pos.x, text_temp_pos.y, 14, BLUE);
-      }
     }
   }
 }

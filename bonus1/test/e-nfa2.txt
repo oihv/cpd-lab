@@ -1,0 +1,14 @@
+States: A B C D E F
+Alphabet: 0 1 eps
+Start: B
+Final: D
+
+Transitions:
+A 0 E
+A 1 B
+B 1 C
+B eps D
+C 1 D
+E 0 F
+E eps B C
+F 0 D

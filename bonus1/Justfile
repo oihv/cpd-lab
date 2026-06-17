@@ -1,0 +1,49 @@
+# Variables to avoid repetition
+cc := "clang++"
+flags := "-lraylib -lGL -lm -lpthread -ldl -lrt -lX11 -Isrc -g -fsanitize=address"
+out_dir := "build"
+RAYLIB_PATH := "/home/nikolas/Programming/testing/raylib"
+
+# Default task: build all examples
+all: build-examples
+
+# Create build directory and compile all .cpp files in example/
+build-examples:
+    @mkdir -p {{out_dir}}
+    @for file in example/*.cpp; do \
+        name=$(basename "$file" .cpp); \
+        echo "Building $name..."; \
+        {{cc}} {{flags}} "$file" -o {{out_dir}}/"$name"; \
+    done
+
+run gui:
+    @mkdir -p {{out_dir}}
+    {{cc}} {{flags}} src/gui.cpp -o {{out_dir}}/gui
+    ./{{out_dir}}/gui
+
+# Build and run a specific example by name (e.g., 'just run nfa_to_dfa')
+run-example name:
+    @mkdir -p {{out_dir}}
+    {{cc}} {{flags}} example/{{name}}.cpp -o {{out_dir}}/{{name}}
+    ./{{out_dir}}/{{name}}
+
+build-wasm:
+    @mkdir -p build_wasm
+    emcc -o build_wasm/index.html src/gui.cpp \
+        -Isrc \
+        -I{{RAYLIB_PATH}}/src \
+        -L{{RAYLIB_PATH}}/src \
+        {{RAYLIB_PATH}}/src/libraylib.web.a \
+        -DPLATFORM_WEB \
+        -s USE_GLFW=3 \
+        -s WASM=1 \
+        -s ALLOW_MEMORY_GROWTH=1 \
+        --shell-file src/shell.html \
+        --preload-file test \
+        -sSTACK_SIZE=5000000
+    
+
+# Clean build artifacts
+clean:
+    rm -rf {{out_dir}}
+    rm -f a.out main
