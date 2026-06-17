@@ -1,3 +1,4 @@
+#include "raylib.h"
 #include <assert.h>
 #include <cstddef>
 #include <cstdint>
@@ -128,6 +129,21 @@ void state_list_print(char names[][MAX_STATE_LENGTH], StateList *s) {
   printf("}");
 }
 
+void state_list_sprint(char names[][MAX_STATE_LENGTH], StateList *s,
+                       char *str) {
+  if (s->count == 0) {
+    sprintf(str + strlen(str), "-");
+    return;
+  }
+  sprintf(str + strlen(str), "{");
+  for (int j = 0; j < s->count; j++) {
+    sprintf(str + strlen(str), "%s", names[s->state_idxs[j]]);
+    if (j != s->count - 1)
+      sprintf(str + strlen(str), " ");
+  }
+  sprintf(str + strlen(str), "}");
+}
+
 typedef struct {
   char names[MAX_STATES][MAX_STATE_LENGTH];
   size_t count;
@@ -153,6 +169,15 @@ typedef struct {
   StateList final; // index of the states in this struct
   size_t transition[MAX_STATES][MAX_ALPHABETS]; // points to the "state set"
 } DFA;
+
+StateSetList nfa_default_state_set_list(NFA *nfa) {
+  StateSetList res = {.count = nfa->states.count};
+  for (int i = 0; i < res.count; i++) {
+    res.set[i].state_idxs[0] = i;
+    res.set[i].count = 1;
+  }
+  return res;
+}
 
 Result nfa_parse(NFA *nfa, FILE *fp) {
   char buff[64];
@@ -304,7 +329,7 @@ Result eps_nfa_to_nfa(NFA *nfa) {
     // add state to final, if the closure contains one of the final states
     for (int j = 0; j < eps_closure.count; j++) {
       if (state_list_contain_idx(&eps_closure.state_idxs[j], &nfa->final)) {
-        if(!state_list_contain_idx((size_t*)&i, &nfa->final)) {
+        if (!state_list_contain_idx((size_t *)&i, &nfa->final)) {
           nfa->final.state_idxs[nfa->final.count++] = i;
         }
       }
@@ -315,8 +340,7 @@ Result eps_nfa_to_nfa(NFA *nfa) {
       StateList new_s = {0};
       // for each state in "from"
       for (int k = 0; k < eps_closure.count; k++) {
-        StateList *to =
-            &nfa->transition[eps_closure.state_idxs[k]][j];
+        StateList *to = &nfa->transition[eps_closure.state_idxs[k]][j];
         // for each state in "to"
         for (int l = 0; l < to->count; l++) {
           if (!state_list_contain_idx(&to->state_idxs[l], &new_s)) {
@@ -700,6 +724,96 @@ void nfa_print(NFA *nfa, char names[][MAX_STATE_LENGTH]) {
       printf("%s ", nfa->alphabets.names[j]);
       state_list_print(names, &nfa->transition[i][j]);
       printf("\n");
+    }
+  }
+}
+
+void nfa_transition_table_draw(Vector2 pos, Vector2 size, NFA *nfa) {
+  Vector2 margin = (Vector2){.x = 5, .y = 5};
+  pos.x += margin.x;
+  pos.y += margin.y;
+  float table_w = size.x - 2 * margin.x;
+  float table_h = size.y - 2 * margin.y;
+  int cell_w = table_w / (nfa->states.count + 1);
+  int cell_h = table_h / (nfa->states.count + 1);
+  Vector2 padding = (Vector2){.x = 5, .y = 5};
+  char buff[MAX_STATE_LENGTH * MAX_STATES] = {0};
+  // row
+  for (int i = 0; i < nfa->states.count + 1; i++) {
+    Vector2 temp_pos = pos;
+    temp_pos.y += i * cell_h;
+    // col
+    for (int j = 0; j < nfa->alphabets.count + 1; j++) {
+      temp_pos.x += j * cell_w;
+      Vector2 text_temp_pos = temp_pos;
+      text_temp_pos.x += padding.x;
+      text_temp_pos.y += padding.y;
+      if (i == 0 && j == 0) {
+        continue; // skip first cell
+      }
+      if (i == 0) { // draw alphabet names first in the first column
+        DrawText(nfa->alphabets.names[j - 1], text_temp_pos.x, text_temp_pos.y,
+                 14, BLACK);
+        DrawLine(temp_pos.x, temp_pos.y, temp_pos.x, temp_pos.y + table_h,
+                 BLACK);
+      } else if (j == 0) { // draw state names
+        DrawText(nfa->states.names[i - 1], text_temp_pos.x, text_temp_pos.y, 14,
+                 GREEN);
+        DrawLine(temp_pos.x, temp_pos.y, temp_pos.x + table_w, temp_pos.y,
+                 BLACK);
+      } else {
+        buff[0] = 0;
+        state_list_sprint(nfa->states.names, &nfa->transition[i - 1][j - 1],
+                          buff);
+        DrawText(buff, text_temp_pos.x, text_temp_pos.y, 14, BLUE);
+      }
+    }
+  }
+}
+void dfa_transition_table_draw(Vector2 pos, Vector2 size, DFA *dfa,
+                               StateNames *names) {
+  Vector2 margin = (Vector2){.x = 5, .y = 5};
+  pos.x += margin.x;
+  pos.y += margin.y;
+  float table_w = size.x - 2 * margin.x;
+  float table_h = size.y - 2 * margin.y;
+  int cell_w = table_w / (dfa->states.count + 1);
+  int cell_h = table_h / (dfa->states.count + 1);
+  Vector2 padding = (Vector2){.x = 5, .y = 5};
+  char buff[MAX_STATE_LENGTH * MAX_STATES] = {0};
+  // row
+  for (int i = 0; i < dfa->states.count + 1; i++) {
+    Vector2 temp_pos = pos;
+    temp_pos.y += i * cell_h;
+    // col
+    for (int j = 0; j < dfa->alphabets.count + 1; j++) {
+      temp_pos.x += j * cell_w;
+      Vector2 text_temp_pos = temp_pos;
+      text_temp_pos.x += padding.x;
+      text_temp_pos.y += padding.y;
+      if (i == 0 && j == 0) {
+        continue; // skip first cell
+      }
+      if (i == 0) { // draw alphabet names first in the first column
+        DrawText(dfa->alphabets.names[j - 1], text_temp_pos.x, text_temp_pos.y,
+                 14, BLACK);
+        DrawLine(temp_pos.x, temp_pos.y, temp_pos.x, temp_pos.y + table_h,
+                 BLACK);
+      } else if (j == 0) { // draw state names
+        buff[0] = 0;
+        state_list_sprint(names->names,
+                          &dfa->states.set[i - 1],
+                          buff);
+        DrawText(buff, text_temp_pos.x, text_temp_pos.y, 14, GREEN);
+        DrawLine(temp_pos.x, temp_pos.y, temp_pos.x + table_w, temp_pos.y,
+                 BLACK);
+      } else {
+        buff[0] = 0;
+        state_list_sprint(names->names,
+                          &dfa->states.set[dfa->transition[i - 1][j - 1]],
+                          buff);
+        DrawText(buff, text_temp_pos.x, text_temp_pos.y, 14, BLUE);
+      }
     }
   }
 }
