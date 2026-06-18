@@ -1,15 +1,16 @@
 # Compiler Design and Principles Bonus Assignment
-NFA to DFA conversion algorithm, extended to also cover E-NFA
+NFA to DFA conversion algorithm, extended to also cover E-NFA.
 
 ## Run
-on linux, run `./run.sh`
-on windows, run `./run.bat`
-if `Justfile` is available, `just run gui` will do.
-to run the build version for the web, locally, run `python3 -m http.server`
-or you can access the hosted version in [github pages](oihv.github.io/cpd-lab)
+On linux, run `./run.sh`.
+On windows, run `./run.bat`.
+If `Justfile` is available, `just run gui` will do.
+To run the build version for the web, locally, run `python3 -m http.server`
+Or you can access the hosted version in [github pages](oihv.github.io/cpd-lab)
 
-## States
-The name of the states is only stored once in a `StateNames` struct, all the other references to the name of the state will then only need to refer to the name of the state by the index of the state in this struct.
+## Controls
+Left and right arrow key to go back and forward.
+Space for pause.
 
 ## TODO
 - [x] nfa to dfa
@@ -27,3 +28,8 @@ The name of the states is only stored once in a `StateNames` struct, all the oth
 - [ ] mark final input with a bounding box
 - [ ] implement more details in the history (e.g. go in depth on epsilon closure, subset construction)
 - [ ] there's a bug for e-nfa1.txt with algo ENFA to DFA, the unchecked_states shows incorrect values
+
+## Codebase Introduction
+
+## States
+The name of the states is only stored once in a `StateNames` struct, all the other references to the name of the state will then only need to refer to the name of the state by the index of the state in this struct.
