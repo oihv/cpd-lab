@@ -1,7 +1,9 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "base.h"
 #include "lib.cpp"
+#include "utils.cpp"
 
 int main(int argc, char **argv) {
   if (argc == 0) {

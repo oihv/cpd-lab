@@ -1,5 +1,4 @@
 // row and col are 0 indexing
-#include "base.h"
 Rectangle nfa_transition_table_get_rect(Vector2 pos, Vector2 size, NFA *nfa,
                                         size_t row, size_t col) {
   Vector2 margin = (Vector2){.x = 5, .y = 5};
@@ -38,7 +37,8 @@ Rectangle dfa_transition_table_get_rect(Vector2 pos, Vector2 size, DFA *dfa,
   return res;
 }
 
-void nfa_transition_table_draw(Vector2 pos, Vector2 size, NFA *nfa) {
+void nfa_transition_table_draw(Vector2 pos, Vector2 size, NFA *nfa,
+                               bool transition_flag[][MAX_ALPHABETS]) {
   Vector2 margin = (Vector2){.x = 5, .y = 5};
   pos.x += margin.x;
   pos.y += margin.y;
@@ -73,9 +73,13 @@ void nfa_transition_table_draw(Vector2 pos, Vector2 size, NFA *nfa) {
                  WHITE);
       } else {
         buff[0] = 0;
-        state_list_sprint(nfa->states.names, &nfa->transition[i - 1][j - 1],
-                          buff);
-        DrawText(buff, text_temp_pos.x, text_temp_pos.y, 14, SKYBLUE);
+        if (transition_flag && transition_flag[i - 1][j - 1] == false) {
+          sprintf(buff, "-");
+        } else {
+          state_list_sprint(nfa->states.names, &nfa->transition[i - 1][j - 1],
+                            buff);
+          DrawText(buff, text_temp_pos.x, text_temp_pos.y, 14, SKYBLUE);
+        }
       }
     }
   }
@@ -131,8 +135,9 @@ void dfa_transition_table_draw(Vector2 pos, Vector2 size, DFA *dfa,
   }
 }
 
-void snapshot_draw(Vector2 pos, Vector2 size, Snapshot *snap, NFA *nfa,
+void snapshot_draw(Vector2 pos, Vector2 size, Snapshot *snap,
                    float progress) {
+  NFA* nfa = snap->nfa_src;
   int text_h = 20; // desc will be written at the bottom of the screen
   char buff[256];
 
@@ -142,69 +147,126 @@ void snapshot_draw(Vector2 pos, Vector2 size, Snapshot *snap, NFA *nfa,
   size.x -= 2 * margin.x;
   size.y -= 2 * margin.y;
 
-  Vector2 nfa_size = size;
-  nfa_size.x = size.x / 3;
-  nfa_size.y -= text_h * 3;
-  DrawText("NFA", pos.x, pos.y, 30, WHITE);
-  nfa_transition_table_draw(pos, nfa_size, nfa);
+  Vector2 left_fa_size = size;
+  left_fa_size.x = size.x / 3 - 2*margin.x;
+  left_fa_size.y -= text_h * 3 + 2*margin.y;
+  char left_title[10], right_title[10];
+  switch (snap->algo_type) {
+  case NFA_TO_DFA:
+    sprintf(left_title, "NFA");
+    sprintf(right_title, "DFA");
+    break;
+  case EPS_NFA_TO_NFA:
+    sprintf(left_title, "eps-NFA");
+    sprintf(right_title, "NFA");
+  }
+  DrawText(left_title, pos.x, pos.y, 30, WHITE);
+  pos.y += 30; // offset for text
+  nfa_transition_table_draw(pos, left_fa_size, nfa, NULL);
 
   Vector2 dfa_pos = pos;
-  dfa_pos.x += nfa_size.x;
-  Vector2 dfa_size = size;
-  dfa_size.x = size.x * (2. / 3);
-  dfa_size.y = nfa_size.y;
-  DrawText("DFA", dfa_pos.x, dfa_pos.y, 30, WHITE);
+  dfa_pos.x += left_fa_size.x;
+  Vector2 right_fa_size = size;
+  right_fa_size.x = size.x * (2. / 3);
+  right_fa_size.y = left_fa_size.y;
+  DrawText(right_title, dfa_pos.x, dfa_pos.y - 30, 30, WHITE);
 
   switch (snap->type) {
-  case STEP_EPS_CLOSURE:
-    break;
+  case STEP_EPS_CLOSURE: {
+    Rectangle rect = nfa_transition_table_get_rect(
+        dfa_pos, right_fa_size, &snap->nfa, snap->active_state + 1, 0);
+    DrawRectangle(rect.x, rect.y, rect.width, rect.height,
+                  (Color){.r = 0, .g = 255, .a = 50});
+
+    rect = nfa_transition_table_get_rect(
+        pos, left_fa_size, nfa, 0, nfa->alphabets.count);
+    DrawRectangle(rect.x, rect.y, rect.width, rect.height,
+                  (Color){.r = 0, .g = 255, .b = 125, .a = 50});
+    rect = nfa_transition_table_get_rect(
+        pos, left_fa_size, nfa, snap->active_state + 1, 0);
+    DrawRectangle(rect.x, rect.y, rect.width, rect.height,
+                  (Color){.r = 0, .g = 255, .b = 125, .a = 50});
+  } break;
   case STEP_QUEUE_POP: {
     // highlight selected state
     Rectangle rect = dfa_transition_table_get_rect(
-        dfa_pos, dfa_size, &snap->dfa, snap->active_state + 1, 0);
+        dfa_pos, right_fa_size, &snap->dfa, snap->active_state + 1, 0);
     DrawRectangle(rect.x, rect.y, rect.width, rect.height,
                   (Color){.r = 0, .g = 255, .a = 50});
     break;
   }
   case STEP_NEW_STATE: {
     Rectangle rect = dfa_transition_table_get_rect(
-        dfa_pos, dfa_size, &snap->dfa, snap->active_state + 1, 0);
+        dfa_pos, right_fa_size, &snap->dfa, snap->active_state + 1, 0);
     DrawRectangle(rect.x, rect.y, rect.width, rect.height,
                   (Color){.r = 0, .g = 255, .a = 50});
     break;
   }
-  case STEP_ALPHABET_SCAN:
-    break;
   case STEP_ADD_TRANSITION: {
-    Rectangle rect = dfa_transition_table_get_rect(
-        dfa_pos, dfa_size, &snap->dfa, snap->active_state + 1,
-        snap->active_alphabet + 1);
+    Rectangle rect;
+    switch (snap->algo_type) {
+
+    case NFA_TO_DFA:
+      rect = dfa_transition_table_get_rect(dfa_pos, right_fa_size, &snap->dfa,
+                                           snap->active_state + 1,
+                                           snap->active_alphabet + 1);
+      break;
+    case EPS_NFA_TO_NFA:
+      rect = nfa_transition_table_get_rect(dfa_pos, right_fa_size, &snap->nfa,
+                                           snap->active_state + 1,
+                                           snap->active_alphabet + 1);
+      break;
+    }
     Vector2 rect_pos;
     rect_pos.x = rect.x;
     rect_pos.y = rect.y;
-    rect_pos = Vector2Lerp((Vector2){.x = 0, .y = pos.y + nfa_size.y}, rect_pos,
-                           progress);
+    rect_pos = Vector2Lerp((Vector2){.x = 0, .y = pos.y + left_fa_size.y},
+                           rect_pos, progress);
     DrawRectangle(rect_pos.x, rect_pos.y, rect.width, rect.height,
                   (Color){.r = 0, .g = 255, .a = 50});
   } break;
   case STEP_SUBSET_CONSTRUCTION: {
-    Rectangle rect = dfa_transition_table_get_rect(
-        dfa_pos, dfa_size, &snap->dfa, snap->active_state + 1,
-        0);
-    Vector2 rect_pos;
-    rect_pos.x = rect.x;
-    rect_pos.y = rect.y;
-    rect_pos = Vector2Lerp((Vector2){.x = 0, .y = pos.y + nfa_size.y}, rect_pos,
-                           progress);
-    DrawRectangle(rect_pos.x, rect_pos.y, rect.width, rect.height,
+    Rectangle rect;
+    switch (snap->algo_type) {
+    case NFA_TO_DFA:
+      rect = dfa_transition_table_get_rect(dfa_pos, right_fa_size, &snap->dfa,
+                                           snap->active_state + 1, 0);
+    DrawRectangle(rect.x, rect.y, rect.width, rect.height,
                   (Color){.r = 0, .g = 255, .a = 50});
+      break;
+    case EPS_NFA_TO_NFA:
+      rect = nfa_transition_table_get_rect(dfa_pos, right_fa_size, &snap->nfa,
+                                           snap->active_state + 1, 0);
+    DrawRectangle(rect.x, rect.y, rect.width, rect.height,
+                  (Color){.r = 0, .g = 255, .a = 50});
+    rect = nfa_transition_table_get_rect(dfa_pos, right_fa_size, &snap->nfa, 0,
+                                         snap->active_alphabet + 1);
+    DrawRectangle(rect.x, rect.y, rect.width, rect.height,
+                  (Color){.r = 0, .g = 255, .a = 50});
+      break;
+    }
   } break;
   }
 
-  dfa_transition_table_draw(dfa_pos, dfa_size, &snap->dfa, &nfa->states,
+  switch (snap->algo_type) {
+  case NFA_TO_DFA:
+
+    dfa_transition_table_draw(dfa_pos, right_fa_size, &snap->dfa, &nfa->states,
+                              snap->dfa_transition_filled);
+    break;
+  case EPS_NFA_TO_NFA:
+    nfa_transition_table_draw(dfa_pos, right_fa_size, &snap->nfa,
+                              snap->dfa_transition_filled);
+    sprintf(buff, "eps_closure: ");
+    state_list_sprint(nfa->states.names, &snap->eps_closure, buff);
+    DrawText(buff, pos.x + size.x / 2, pos.y + left_fa_size.y + text_h, 14,
+             WHITE);
+    break;
+  }
+  dfa_transition_table_draw(dfa_pos, right_fa_size, &snap->dfa, &nfa->states,
                             snap->dfa_transition_filled);
 
-  DrawText(snap->description, pos.x, pos.y + nfa_size.y, 14, WHITE);
+  DrawText(snap->description, pos.x, pos.y + left_fa_size.y, 14, WHITE);
 
   sprintf(buff, "unchecked_states: ");
   StateList s = {0};
@@ -213,9 +275,8 @@ void snapshot_draw(Vector2 pos, Vector2 size, Snapshot *snap, NFA *nfa,
     state_list_sprint(nfa->states.names, &snap->dfa.states.set[s.state_idxs[i]],
                       buff + strlen(buff));
   }
-  DrawText(buff, pos.x, pos.y + nfa_size.y + text_h, 14, WHITE);
+  DrawText(buff, pos.x, pos.y + left_fa_size.y + text_h, 14, WHITE);
   sprintf(buff, "new_state: ");
-  state_list_sprint(nfa->states.names, &snap->highlight_set,
-                    buff + strlen(buff));
-  DrawText(buff, pos.x, pos.y + nfa_size.y + 2 * text_h, 14, WHITE);
+  state_list_sprint(nfa->states.names, &snap->new_state, buff + strlen(buff));
+  DrawText(buff, pos.x, pos.y + left_fa_size.y + 2 * text_h, 14, WHITE);
 }

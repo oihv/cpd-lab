@@ -1,34 +1,3 @@
-#include "base.h"
-
-Result queue_push(Queue *q, size_t new_item) {
-  if (q->count == MAX_QUEUE_SIZE)
-    return Err;
-  q->item[q->count++ % MAX_QUEUE_SIZE] = new_item;
-  q->count = q->count % MAX_QUEUE_SIZE;
-  return Ok;
-}
-
-Result queue_pop(Queue *q, size_t *item) {
-  if (q->count == 0)
-    return Err;
-  *item = q->item[q->pop_idx++ % MAX_QUEUE_SIZE];
-  q->pop_idx = q->pop_idx % MAX_QUEUE_SIZE;
-  q->count--;
-  if (q->count == 0)
-    q->pop_idx = 0;
-  return Ok;
-}
-
-bool queue_is_empty(Queue *q) { return q->count == 0; }
-
-void queue_to_state_list(Queue *q, StateList *s) {
-  size_t it = q->pop_idx;
-  for (int i = 0; i < q->count; i++) {
-    s->state_idxs[s->count++] = q->item[it];
-    it = (it + 1) % MAX_QUEUE_SIZE;
-  }
-}
-
 // Return Err when not found
 Result find_state(char *name, char states[][MAX_STATE_LENGTH],
                   uint8_t state_count, size_t *idx) {
@@ -226,6 +195,17 @@ Result nfa_parse(NFA *nfa, FILE *fp) {
   return Ok;
 }
 
+// AI generated: to mitigate having to rewrite parsing logic for strings (it was hard coded to deal with files instead)
+// dump the string content into a temporary file, and pass it to the real function
+Result nfa_parse_str(NFA *nfa, const char *data) {
+    FILE *f = tmpfile();                // Works on native & WASM
+    fwrite(data, 1, strlen(data), f);   // Copy string to temp file
+    rewind(f);                           // Reset to start
+    Result r = nfa_parse(nfa, f);       // Reuse your existing logic
+    fclose(f);
+    return r;
+}
+
 // eps-NFA is just an NFA that have eps as a transition alphabet
 Result eps_nfa_parse(NFA *nfa, FILE *fp) {
   nfa_parse(nfa, fp);
@@ -244,11 +224,37 @@ Result eps_nfa_parse(NFA *nfa, FILE *fp) {
   return Ok;
 }
 
-Result eps_nfa_to_nfa(NFA *nfa) {
+// AI generated: same reason as nfa_parse_str
+Result eps_nfa_parse_str(NFA *nfa, const char *data) {
+    FILE *f = tmpfile();                // Works on native & WASM
+    fwrite(data, 1, strlen(data), f);   // Copy string to temp file
+    rewind(f);                           // Reset to start
+    nfa_parse(nfa, f);
+    bool found = false;
+    for (int i = 0; i < nfa->alphabets.count; i++) {
+      if (!strncmp(nfa->alphabets.names[i], "eps", 3)) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      fprintf(stderr, "ERROR: %s: eps-NFA don't have eps transition alphabet\n",
+              __FUNCTION__);
+      return Err;
+    }
+    fclose(f);
+    return Ok;
+}
+
+// *hist* is only needed for animation, NULL if not needed
+Result eps_nfa_to_nfa(NFA* nfa_src, NFA *nfa_res, History *hist) {
+  size_t hist_count_start = hist->count;
   size_t eps_i = 0;
   bool found = false;
-  for (int j = 0; j < nfa->alphabets.count; j++) {
-    if (!strncmp(nfa->alphabets.names[j], "eps", 3)) {
+  *nfa_res = *nfa_src;
+  nfa_res->alphabets.count--;
+  for (int j = 0; j < nfa_src->alphabets.count; j++) {
+    if (!strncmp(nfa_src->alphabets.names[j], "eps", 3)) {
       eps_i = j;
       found = true;
       break;
@@ -258,39 +264,81 @@ Result eps_nfa_to_nfa(NFA *nfa) {
     fprintf(stderr, "ERROR: %s: eps-NFA don't have eps transition alphabet\n",
             __FUNCTION__);
   }
-  StateList temp_transition[MAX_STATES][MAX_ALPHABETS] = {0};
-  for (int i = 0; i < nfa->states.count; i++) {
+  bool nfa_transition_filled[MAX_STATES][MAX_ALPHABETS] = {0};
+  char buff[MAX_STATE_LENGTH * MAX_STATES] = {0};
+  for (int i = 0; i < nfa_src->states.count; i++) {
     StateList eps_closure = {0};
     Queue unchecked_states = {0};
     eps_closure.state_idxs[eps_closure.count++] = i;
     queue_push(&unchecked_states, i);
+    if (hist) {
+      Snapshot *handle = &hist->steps[hist->count++];
+      *handle = {.type = STEP_EPS_CLOSURE,
+                 .nfa = *nfa_res,
+                 .queue = unchecked_states,
+                 .active_state = (size_t)i,
+                 .eps_closure = eps_closure};
+      transition_filled_copy(handle->dfa_transition_filled, nfa_transition_filled);
+      sprintf(handle->description,
+              "Start Eps-Closure computation with state %s", nfa_src->states.names[i]);
+    }
     // compute eps closure
     while (!queue_is_empty(&unchecked_states)) {
       size_t curr;
       queue_pop(&unchecked_states, &curr);
-      for (int j = 0; j < nfa->transition[curr][eps_i].count; j++) {
-        size_t to = nfa->transition[curr][eps_i].state_idxs[j];
+      for (int j = 0; j < nfa_src->transition[curr][eps_i].count; j++) {
+        size_t to = nfa_src->transition[curr][eps_i].state_idxs[j];
         if (!state_list_contain_idx(&to, &eps_closure)) {
           eps_closure.state_idxs[eps_closure.count++] = to;
           queue_push(&unchecked_states, to);
         }
       }
     }
+    if (hist) {
+      Snapshot *handle = &hist->steps[hist->count++];
+      *handle = {
+          .type = STEP_EPS_CLOSURE,
+          .nfa = *nfa_res,
+          .queue = unchecked_states,
+          .active_state = (size_t)i,
+          .eps_closure = eps_closure,
+      };
+      transition_filled_copy(handle->dfa_transition_filled, nfa_transition_filled);
+      sprintf(handle->description,
+              "Finished Eps-Closure computation with state %s", nfa_src->states.names[i]);
+    }
     // add state to final, if the closure contains one of the final states
     for (int j = 0; j < eps_closure.count; j++) {
-      if (state_list_contain_idx(&eps_closure.state_idxs[j], &nfa->final)) {
-        if (!state_list_contain_idx((size_t *)&i, &nfa->final)) {
-          nfa->final.state_idxs[nfa->final.count++] = i;
+      if (state_list_contain_idx(&eps_closure.state_idxs[j], &nfa_src->final)) {
+        if (!state_list_contain_idx((size_t *)&i, &nfa_res->final)) {
+          nfa_res->final.state_idxs[nfa_res->final.count++] = i;
         }
       }
     }
     // subset construction
     // for each alphabet
-    for (int j = 0; j < nfa->alphabets.count; j++) {
+    for (int j = 0; j < nfa_res->alphabets.count; j++) {
       StateList new_s = {0};
+      if (hist) {
+        Snapshot *handle = &hist->steps[hist->count++];
+        *handle = {
+            .type = STEP_SUBSET_CONSTRUCTION,
+            .nfa = *nfa_res,
+            .queue = unchecked_states,
+            .active_state = (size_t)i,
+            .active_alphabet = (size_t)j,
+            .eps_closure = eps_closure,
+        };
+        transition_filled_copy(handle->dfa_transition_filled,
+                               nfa_transition_filled);
+        sprintf(handle->description,
+                "Subset construction started: populate new_state with states "
+                "that can be reached with \"%s\" from %s",
+                nfa_res->alphabets.names[j], nfa_src->states.names[i]);
+      }
       // for each state in "from"
       for (int k = 0; k < eps_closure.count; k++) {
-        StateList *to = &nfa->transition[eps_closure.state_idxs[k]][j];
+        StateList *to = &nfa_src->transition[eps_closure.state_idxs[k]][j];
         // for each state in "to"
         for (int l = 0; l < to->count; l++) {
           if (!state_list_contain_idx(&to->state_idxs[l], &new_s)) {
@@ -299,16 +347,48 @@ Result eps_nfa_to_nfa(NFA *nfa) {
         }
       }
       qsort(new_s.state_idxs, new_s.count, sizeof(size_t), compare);
-      temp_transition[i][j] = new_s;
+      if (hist) {
+        Snapshot *handle = &hist->steps[hist->count++];
+        *handle = {
+            .type = STEP_SUBSET_CONSTRUCTION,
+            .nfa = *nfa_res,
+            .queue = unchecked_states,
+            .active_state = (size_t)i,
+            .active_alphabet = (size_t)j,
+            .eps_closure = eps_closure,
+        };
+        transition_filled_copy(handle->dfa_transition_filled,
+                               nfa_transition_filled);
+        sprintf(handle->description,
+                "Subset construction completed:");
+      }
+      nfa_res->transition[i][j] = new_s;
+      if (hist) {
+        Snapshot *handle = &hist->steps[hist->count++];
+        *handle = {
+            .type = STEP_ADD_TRANSITION,
+            .nfa = *nfa_res,
+            .queue = unchecked_states,
+            .active_state = (size_t)i,
+            .active_alphabet = (size_t)j,
+            .eps_closure = eps_closure,
+        };
+        nfa_transition_filled[i][j] = true;
+        transition_filled_copy(handle->dfa_transition_filled,
+                               nfa_transition_filled);
+        buff[0] = '\0';
+        state_list_sprint(nfa_src->states.names, &new_s, buff);
+        sprintf(handle->description,
+                "Add transition from state %s on \"%s\" to state %s",nfa_src->states.names[i], nfa_res->alphabets.names[j], buff);
+      }
     }
   }
-  for (int i = 0; i < nfa->states.count; i++) {
-    for (int j = 0; j < nfa->alphabets.count; j++) {
-      nfa->transition[i][j] = temp_transition[i][j];
-    }
+  // set history to EPS_NFA_TO_NFA
+  for (int i = hist_count_start; i < hist->count; i++) {
+    hist->steps[i].algo_type = EPS_NFA_TO_NFA;
+    hist->steps[i].nfa_src = nfa_src; // pointer to nfa_src
   }
-  qsort(nfa->final.state_idxs, nfa->final.count, sizeof(size_t), compare);
-  nfa->alphabets.count--;
+  qsort(nfa_res->final.state_idxs, nfa_res->final.count, sizeof(size_t), compare);
   return Ok;
 }
 
@@ -538,17 +618,9 @@ bool dfa_compare(DFA *a, DFA *b) {
   return true;
 }
 
-void transition_filled_copy(bool dst[][MAX_ALPHABETS],
-                            bool src[][MAX_ALPHABETS]) {
-  for (int i = 0; i < MAX_STATES; i++) {
-    for (int j = 0; j < MAX_ALPHABETS; j++) {
-      dst[i][j] = src[i][j];
-    }
-  }
-}
-
 // *hist* is used for animation, NULL if not used
 Result nfa_to_dfa(NFA *nfa, DFA *dfa, History *hist) {
+  size_t hist_count_start = hist->count;
   bool dfa_transition_filled[MAX_STATES][MAX_ALPHABETS] = {0};
   dfa->alphabets = nfa->alphabets;
   dfa->start_idx = nfa->start_idx;
@@ -689,11 +761,12 @@ Result nfa_to_dfa(NFA *nfa, DFA *dfa, History *hist) {
             .type = STEP_SUBSET_CONSTRUCTION,
             .dfa = *dfa,
             .queue = unchecked_states,
-            .active_state = dfa->states.set[curr_idx].state_idxs[0],
+            .active_state = curr_idx,
             .active_alphabet = (size_t)i,
-            .highlight_set = new_s,
+            .new_state = new_s,
         };
-        transition_filled_copy(handle->dfa_transition_filled, dfa_transition_filled);
+        transition_filled_copy(handle->dfa_transition_filled,
+                               dfa_transition_filled);
         buff[0] = '\0';
         state_list_sprint(nfa->states.names, &dfa->states.set[curr_idx], buff);
         sprintf(handle->description,
@@ -701,7 +774,7 @@ Result nfa_to_dfa(NFA *nfa, DFA *dfa, History *hist) {
                 "already exists in current_state");
       }
       size_t found_idx;
-      if (find_state_list(&dfa->states, &new_s, &found_idx) != Ok) {
+      if (new_s.count > 0 && find_state_list(&dfa->states, &new_s, &found_idx) != Ok) {
         queue_push(&unchecked_states, dfa->states.count);
         dfa->states.set[dfa->states.count++] = new_s;
         if (hist) {
@@ -712,9 +785,10 @@ Result nfa_to_dfa(NFA *nfa, DFA *dfa, History *hist) {
               .queue = unchecked_states,
               .active_state = dfa->states.count - 1,
               .active_alphabet = (size_t)i,
-              .highlight_set = new_s,
+              .new_state = new_s,
           };
-          transition_filled_copy(handle->dfa_transition_filled, dfa_transition_filled);
+          transition_filled_copy(handle->dfa_transition_filled,
+                                 dfa_transition_filled);
           sprintf(handle->description,
                   "new_state was not in states: new state was added");
         }
@@ -730,13 +804,20 @@ Result nfa_to_dfa(NFA *nfa, DFA *dfa, History *hist) {
             .queue = unchecked_states,
             .active_state = curr_idx,
             .active_alphabet = (size_t)i,
-            .highlight_set = new_s,
+            .new_state = new_s,
         };
         dfa_transition_filled[curr_idx][i] = true;
-        transition_filled_copy(handle->dfa_transition_filled, dfa_transition_filled);
+        transition_filled_copy(handle->dfa_transition_filled,
+                               dfa_transition_filled);
         sprintf(handle->description, "Added new transition");
       }
     }
+  }
+
+  // set history to NFA_TO_DFA
+  for (int i = hist_count_start; i < hist->count; i++) {
+    hist->steps[i].algo_type = NFA_TO_DFA;
+    hist->steps[i].nfa_src = nfa; // pointer to nfa_src
   }
 
   for (int i = 0; i < dfa->states.count; i++) {

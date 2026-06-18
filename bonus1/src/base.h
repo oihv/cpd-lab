@@ -3,6 +3,8 @@
 
 #include "raylib.h"
 #include "raymath.h"
+#define RAYGUI_IMPLEMENTATION
+#include "raygui.h"
 #include "time.h"
 #include <assert.h>
 #include <stddef.h>
@@ -69,21 +71,25 @@ typedef enum {
   STEP_EPS_CLOSURE,    // Highlighting epsilon search
   STEP_QUEUE_POP,      // Highlighting state being processed
   STEP_NEW_STATE,      // Highlighting state added to queue
-  STEP_ALPHABET_SCAN,  // Highlighting current transition
   STEP_ADD_TRANSITION, // Showing result moving to DFA
   STEP_SUBSET_CONSTRUCTION
 } StepType;
 
+typedef enum { NFA_TO_DFA, EPS_NFA_TO_NFA } AlgoType;
+
 typedef struct {
   StepType type;
+  AlgoType algo_type;
   NFA nfa;
+  NFA* nfa_src;
   DFA dfa;
   bool dfa_transition_filled[MAX_STATES]
                             [MAX_ALPHABETS]; // determine whether or not
   Queue queue;
   size_t active_state; // index of the state wanted to be highlighted
   size_t active_alphabet;
-  StateList highlight_set; // e.g., current epsilon closure
+  StateList new_state; 
+  StateList eps_closure;
   char description[128];
 } Snapshot;
 
@@ -92,19 +98,15 @@ typedef struct {
   int count;
 } History;
 
-typedef struct {
-  NFA nfa;
-  DFA dfa;
-  History hist;
-  bool autoplay;
-  size_t curr_snap_idx;
-  char progress_str[10];
-  float progress;
-  float animation_duration;
-} GuiData;
-
 // API
-void queue_to_state_list(Queue*q, StateList* s);
+// utils
+Result queue_push(Queue *q, size_t new_item);
+bool queue_is_empty(Queue *q);
+Result queue_pop(Queue *q, size_t *item);
+void queue_to_state_list(Queue *q, StateList *s);
+
 void state_list_sprint(char names[][MAX_STATE_LENGTH], StateList *s, char *str);
+void transition_filled_copy(bool dst[][MAX_ALPHABETS],
+                            bool src[][MAX_ALPHABETS]);
 
 #endif // !BASE_H

@@ -1,6 +1,6 @@
 # Variables to avoid repetition
 cc := "clang++"
-flags := "-lraylib -lGL -lm -lpthread -ldl -lrt -lX11 -Isrc -g -fsanitize=address"
+flags := "-lraylib -lGL -lm -lpthread -ldl -lrt -lX11 -Isrc -g "
 out_dir := "build"
 RAYLIB_PATH := "/home/nikolas/Programming/testing/raylib"
 
@@ -30,20 +30,24 @@ run-example name:
 build-wasm:
     @mkdir -p build_wasm
     emcc -o build_wasm/index.html src/gui.cpp \
+        -std=c++17 \
+        -D_DEFAULT_SOURCE \
+        -U_GNU_SOURCE -D_ISOC99_SOURCE -D_POSIX_C_SOURCE=200809L \
         -Isrc \
         -I{{RAYLIB_PATH}}/src \
         -L{{RAYLIB_PATH}}/src \
+        -I/usr/include/ \
         {{RAYLIB_PATH}}/src/libraylib.web.a \
         -DPLATFORM_WEB \
         -s USE_GLFW=3 \
         -s WASM=1 \
         -s ALLOW_MEMORY_GROWTH=1 \
         --shell-file src/shell.html \
-        --preload-file test \
+        --preload-file assets@\assets \
         -sSTACK_SIZE=5000000
-    
 
 # Clean build artifacts
 clean:
     rm -rf {{out_dir}}
+    rm -rf build_wasm
     rm -f a.out main

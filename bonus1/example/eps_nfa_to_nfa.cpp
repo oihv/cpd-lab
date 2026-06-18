@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdint.h>
+#include "base.h"
 #include "lib.cpp"
+#include "utils.cpp"
 
 int main(int argc, char* argv[]) {
   FILE* fp = fopen(argv[1], "r");
@@ -13,7 +15,8 @@ int main(int argc, char* argv[]) {
   eps_nfa_parse(&nfa, fp);
   printf("----------------eps-NFA:---------------\n");
   nfa_print(&nfa, nfa.states.names);
-  eps_nfa_to_nfa(&nfa);
+  NFA nfa_res = {0};
+  eps_nfa_to_nfa(&nfa, &nfa_res, NULL);
   printf("----------------Regular NFA:---------------\n");
   nfa_print(&nfa, nfa.states.names);
 
