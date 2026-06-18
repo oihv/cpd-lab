@@ -71,7 +71,7 @@ var ENVIRONMENT_IS_SHELL = !ENVIRONMENT_IS_WEB && !ENVIRONMENT_IS_NODE && !ENVIR
 
 // --pre-jses are emitted after the Module integration code, so that they can
 // refer to Module (if they choose; they can also define Module)
-// include: /tmp/tmp_nz96ld1.js
+// include: /tmp/tmpy50fcbt_.js
 
   if (!Module['expectedDataFileDownloads']) Module['expectedDataFileDownloads'] = 0;
   Module['expectedDataFileDownloads']++;
@@ -200,25 +200,25 @@ Module['FS_createPath']("/", "assets", true, true);
     }
 
     }
-    loadPackage({"files": [{"filename": "./style_dark.rgs", "start": 0, "end": 3730}], "remote_package_size": 3730});
+    loadPackage({"files": [{"filename": "/assets/style_dark.rgs", "start": 0, "end": 3730}], "remote_package_size": 3730});
 
   })();
 
-// end include: /tmp/tmp_nz96ld1.js
-// include: /tmp/tmpuxbqhya2.js
+// end include: /tmp/tmpy50fcbt_.js
+// include: /tmp/tmp4o2gspua.js
 
     // All the pre-js content up to here must remain later on, we need to run
     // it.
     if ((typeof ENVIRONMENT_IS_WASM_WORKER != 'undefined' && ENVIRONMENT_IS_WASM_WORKER) || (typeof ENVIRONMENT_IS_PTHREAD != 'undefined' && ENVIRONMENT_IS_PTHREAD) || (typeof ENVIRONMENT_IS_AUDIO_WORKLET != 'undefined' && ENVIRONMENT_IS_AUDIO_WORKLET)) Module['preRun'] = [];
     var necessaryPreJSTasks = Module['preRun'].slice();
-  // end include: /tmp/tmpuxbqhya2.js
-// include: /tmp/tmpl_y6241d.js
+  // end include: /tmp/tmp4o2gspua.js
+// include: /tmp/tmphj90s736.js
 
     if (!Module['preRun']) throw 'Module.preRun should exist because file support used it; did a pre-js delete it?';
     necessaryPreJSTasks.forEach((task) => {
       if (Module['preRun'].indexOf(task) < 0) throw 'All preRun tasks that exist before user pre-js code should remain after; did you replace Module or modify Module.preRun?';
     });
-  // end include: /tmp/tmpl_y6241d.js
+  // end include: /tmp/tmphj90s736.js
 
 
 var arguments_ = [];
